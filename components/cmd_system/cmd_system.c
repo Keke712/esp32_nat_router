@@ -24,6 +24,10 @@
 #include "cmd_system.h"
 #include "sdkconfig.h"
 
+#include "driver/gpio.h"
+#include "driver/rtc_io.h"
+#include "esp_sleep.h"
+
 #ifdef CONFIG_FREERTOS_USE_STATS_FORMATTING_FUNCTIONS
 #define WITH_TASKS_INFO 1
 #endif
@@ -202,7 +206,7 @@ static int deep_sleep(int argc, char **argv)
     }
     if (deep_sleep_args.wakeup_gpio_num->count) {
         int io_num = deep_sleep_args.wakeup_gpio_num->ival[0];
-        if (!GPIO_IS_VALID_DIGITAL_IO_PAD(io_num)) {
+        if (io_num >= GPIO_NUM_MAX || io_num < 0) {
             ESP_LOGE(TAG, "GPIO %d is not an RTC IO", io_num);
             return 1;
         }
@@ -287,7 +291,8 @@ static int light_sleep(int argc, char **argv)
         ESP_LOGI(TAG, "Enabling wakeup on GPIO%d, wakeup on %s level",
                  io_num, level ? "HIGH" : "LOW");
 
-        ESP_ERROR_CHECK( gpio_wakeup_enable(io_num, level ? GPIO_INTR_HIGH_LEVEL : GPIO_INTR_LOW_LEVEL) );
+        ESP_ERROR_CHECK(esp_sleep_enable_gpio_wakeup());
+        ESP_ERROR_CHECK(gpio_set_intr_type(io_num, level ? GPIO_INTR_HIGH_LEVEL : GPIO_INTR_LOW_LEVEL));
     }
     if (io_count > 0) {
         ESP_ERROR_CHECK( esp_sleep_enable_gpio_wakeup() );
