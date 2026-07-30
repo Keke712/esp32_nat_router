@@ -1,297 +1,157 @@
-# ESP32 NAT Router with WPA2 Enterprise support
+# ESP32 NAT Router
 
-This is a firmware to use the ESP32 as WiFi NAT router. It can be used as
+This is a firmware to use the ESP32 as WiFi NAT router. It routes between the network of the AP interface and the STA or ETH interface as uplink network. It can also work as a VPN router using WireGuard as uplink.
+
+## Other WiFi Router/Repeater Projects
+Starting from this code base I started several spin-off projects with slightly differrent scope. These are all (ab)using the ESP as a minimal network device. 
+
+- **Layer 2 WiFi Repeater**: Finally we have it - the **WiFi Repeater**, a layer 2 network bridge between STA and AP (no NAT, no DHCP, just plain frame forwarding in one broadcast domain, i.e. one IP network segment). You currently find it's sources in the [esp32_wifi_repeater](https://github.com/martin-ger/esp32_nat_router/tree/esp32_wifi_repeater) branch of this repo, that is still under development, but it works generally with good performance and makes it a >2$ WiFi extender.
+- **WiFi Access Point**: If you have a **W32-ET01 board** and you are looking for a plain ESP32 **Ethernet AP**, or correctly for an **Ethernet to WiFi Layer 2 Bridge**, check out [esp32_eth_wifi_bridge](https://github.com/martin-ger/esp32_eth_wifi_bridge). 
+- **Ethernet Router**: If you are looking for an ESP32 NAT router with reverse direction, i.e. **WiFi STA as uplink** (Internet) and **Ethernet as downlink** (LAN), check out [esp32_ethernet_router](https://github.com/martin-ger/esp32_ethernet_router). Here I also experiment with support for the common WIZnet W5500 SPI Ethernet NIC.
+- **PPPoE Router**: If you ever consider using the ESP32 as an open-source ISP router, have a look at the [esp32_PPPoE_router](https://github.com/martin-ger/esp32_PPPoE_router). It adds PPPoE as additional Ethernet uplink option. So it could be used directly on an ISP modem.
+- **ESP8266 NAT Router/Repeater**: The *grandfather* of all these projects, a feature monster once build on the NONOS-SDK for the [ESP8266](https://github.com/martin-ger/esp_wifi_repeater).
+
+## Use cases for the NAT Router:
 - Simple range extender for an existing WiFi network
-- Setting up an additional WiFi network with different SSID/password for guests or IOT devices
-- Convert a corporate (WPA2-Enterprise) network to a regular network, for simple devices.
+- An additional WiFi network with different SSID/password and restricted access for guests or IoT devices
+- VPN-Router using WireGuard
+- Converter from a corporate (WPA2-Enterprise) network to a regular (WPA-PSK) network for simple devices
+- Classic WiFi router with Ethernet uplink
+- MCP-server to control your network using agentic AI
+- Presence detection and network monitoring in a Home Assistant IoT network
+- Debugging and monitoring of WiFi devices
 
+## Key Features
 
-It can achieve a bandwidth of more than 15mbps.
+- **NAT Routing**: Full WiFi NAT router with IP forwarding (15+ Mbps throughput)
+- **WireGuard VPN**: Optional VPN tunnel for upstream traffic with automatic MSS clamping and Path MTU
+- **DHCP Reservations**: Assign fixed IPs to specific MAC addresses
+- **Port Forwarding**: Map external ports to internal devices
+- **Firewall**: Define ACL to restrict or monitor traffic
+- **PCAP Capture**: Live packet capture can be streamed to Wireshark or other network tools
+- **WPA2-Enterprise Support**: Connect to corporate networks (PEAP, TTLS, TLS) and convert them to WPA2-PSK
+- **5 GHz WiFi**: Dual-band support on ESP32-C5 with configurable band preference (auto/2.4 GHz/5 GHz)
+- **Ethernet Support**: Use a W32-ET01 board with LAN8720 PHY to get Ethernet uplink
+- **Web Interface**: Web UI with password protection for easy configuration
+- **Serial Console**: Full CLI for advanced configuration
+- **Remote Console**: Network-accessible CLI via TCP (password protected, per-interface binding)
+- **LED Status Indicator**: Visual feedback via plain GPIO LED or addressable LED strip (WS2812/SK6812) with color-coded status
+- **OLED Display**: Status display on 72x40 I2C SSD1306 OLEDs (as found on some ESP32-C3 mini boards)
+- **MQTT Home Assistant**: Publish telemetry and per-client stats to MQTT with HA auto-discovery
+- **MCP Bridge (AI-Ready)**: BETA - Control the router from AI assistants (Claude, etc.) via the Model Context Protocol
+- **mDNS**: The router is reachable as `esp32-nat-router.local` via mDNS/Bonjour — no need to look up the IP address.
+- **OTA Updates**: Flash new firmware directly from the Web UI
 
-The code is based on the [Console Component](https://docs.espressif.com/projects/esp-idf/en/latest/api-guides/console.html#console) and the [esp-idf-nat-example](https://github.com/jonask1337/esp-idf-nat-example). 
-
-## Performance
-
-All tests used `IPv4` and the `TCP` protocol.
-
-| Board | Tools | Optimization | CPU Frequency | Throughput | Power |
-| ----- | ----- | ------------ | ------------- | ---------- | ----- |
-| `ESP32D0WDQ6` | `iperf3` | `0g` | `240MHz` | `16.0 MBits/s` | `1.6 W` |
-| `ESP32D0WDQ6` | `iperf3` | `0s` | `240MHz` | `10.0 MBits/s` | `1.8 W` | 
-| `ESP32D0WDQ6` | `iperf3` | `0g` | `160MHz` | `15.2 MBits/s` | `1.4 W` |
-| `ESP32D0WDQ6` | `iperf3` | `0s` | `160MHz` | `14.1 MBits/s` | `1.5 W` |
+The maximum number of simultaniously connected WiFi clients is 8 (5 on the ESP32c3) due to RAM limitations (uses about 5KB per client). Each of the features: Web Interface, PCAP Capture, Wireguard VPN, Remote Console, WPA Enterprise and MQTT Home Assistant require several KB of additional RAM. So using all of them at once will probably burst the ESP32's ressources. Unused/disabled features are optimized for minimal to no RAM usage. Have a look at remaining heap size if in doubt.
 
 ## First Boot
-After first boot the ESP32 NAT Router will offer a WiFi network with an open AP and the ssid "ESP32_NAT_Router". Configuration can either be done via a simple web interface or via the serial console. 
 
-## Web Config Interface
-The web interface allows for the configuration of all parameters. Connect you PC or smartphone to the WiFi SSID "ESP32_NAT_Router" and point your browser to "http://192.168.4.1". This page should appear:
+After first boot the ESP32 NAT Router will offer a WiFi network with an open AP and the ssid "ESP32_NAT_Router". Configuration can either be done via a web interface or via the serial console.
 
-<img src="https://raw.githubusercontent.com/marci07iq/esp32_nat_router/master/ESP32_NAT_UI3.png">
+1. Connect to the **ESP32_NAT_Router** WiFi network
+2. Open **http://esp32-nat-router.local** (or http://192.168.4.1) in your browser
+3. Configure your upstream WiFi and AP settings on the Getting Started page
+4. Click **Save & Reboot**
 
-First enter the appropriate values for the uplink WiFi network, the "STA Settings". Leave password blank for open networks. Click "Connect". The ESP32 reboots and will connect to your WiFi router.
+<img src="https://raw.githubusercontent.com/martin-ger/esp32_nat_router/master/UI_Index.png">
 
-Now you can reconnect and reload the page and change the "Soft AP Settings". Click "Set" and again the ESP32 reboots. Now it is ready for forwarding traffic over the newly configured Soft AP. Be aware that these changes also affect the config interface, i.e. to do further configuration, connect to the ESP32 through one of the newly configured WiFi networks.
+## Flashing Pre-built Binaries
 
-If you want to enter a '+' in the web interface you have to use HTTP-style hex encoding like "Mine%2bYours". This will result in a string "Mine+Yours". With this hex encoding you can enter any byte value you like, except for 0 (for C-internal reasons).
+### Web Installer (Easiest)
 
-It you want to disable the web interface (e.g. for security reasons), go to the CLI and enter:
-```
-nvs_namespace esp32_nat
-nvs_set lock str -v 1
-```
-After restart, no webserver is started any more. You can only re-enable it with:
-```
-nvs_namespace esp32_nat
-nvs_set lock str -v 0
-```
-If you made a mistake and have lost all contact with the ESP you can still use the serial console to reconfigure it. All parameter settings are stored in NVS (non volatile storage), which is *not* erased by simple re-flashing the binaries. If you want to wipe it out, use "esptool.py -p /dev/ttyUSB0 erase_flash".
+Flash directly from your browser — no tools or command line required:
 
-## Access devices behind the router
+**[Open Web Installer](https://martin-ger.github.io/esp32_nat_router/)**
 
-If you want to access a device behind the esp32 NAT router? `PC -> local router -> esp32NAT -> server`
+Requires a browser with Web Serial API. Select your firmware variant (WiFi or Ethernet) and click "Connect & Install".
 
-Lets say "server" is exposing a webserver on port 80 and you want to access that from your PC.  
-For that you need to configure a portmap (e.g. by connecting via the arduino IDE uart monitor through USB)
+### esptool (Command Line)
 
-```
-portmap add TCP 8080 192.168.4.2 80
-                                 ↑ port of the webserver
-                            ↑ server's ip in esp32NAT network
-                  ↑ exposed port in the local router's network
-```
-     
-Assuming the esp32NAT's ip address in your `local router` is `192.168.0.57` you can acces the server by typing `192.168.0.57:8080` into your browser now.
-
-## Interpreting the on board LED
-
-If the ESP32 is connected to the upstream AP then the on board LED should be on, otherwise off.
-If there are devices connected to the ESP32 then the on board LED will keep blinking as many times as the number of devices connected.
-
-For example:
-
-One device connected to the ESP32, and the ESP32 is connected to upstream: 
-
-`*****.*****`
-
-Two devices are connected to the ESP32, but the ESP32 is not connected to upstream: 
-
-`....*.*....`
-
-# Command Line Interface
-
-For configuration you have to use a serial console (Putty or GtkTerm with 115200 bps).
-Use the "set_sta" and the "set_ap" command to configure the WiFi settings. Changes are stored persistently in NVS and are applied after next restart. Use "show" to display the current config. The NVS namespace for the parameters is "esp32_nat"
-
-Enter the `help` command get a full list of all available commands:
-```
-help 
-  Print the list of registered commands
-
-free 
-  Get the current size of free heap memory
-
-heap 
-  Get minimum size of free heap memory that was available during program execu
-  tion
-
-version 
-  Get version of chip and SDK
-
-restart 
-  Software reset of the chip
-
-deep_sleep  [-t <t>] [--io=<n>] [--io_level=<0|1>]
-  Enter deep sleep mode. Two wakeup modes are supported: timer and GPIO. If no
-  wakeup option is specified, will sleep indefinitely.
-  -t, --time=<t>  Wake up time, ms
-      --io=<n>  If specified, wakeup using GPIO with given number
-  --io_level=<0|1>  GPIO level to trigger wakeup
-
-light_sleep  [-t <t>] [--io=<n>]... [--io_level=<0|1>]...
-  Enter light sleep mode. Two wakeup modes are supported: timer and GPIO. Mult
-  iple GPIO pins can be specified using pairs of 'io' and 'io_level' arguments
-  . Will also wake up on UART input.
-  -t, --time=<t>  Wake up time, ms
-      --io=<n>  If specified, wakeup using GPIO with given number
-  --io_level=<0|1>  GPIO level to trigger wakeup
-
-tasks 
-  Get information about running tasks
-
-nvs_set  <key> <type> -v <value>
-  Set key-value pair in selected namespace.
-Examples:
- nvs_set VarName i32 -v 
-  123 
- nvs_set VarName str -v YourString 
- nvs_set VarName blob -v 0123456789abcdef 
-         <key>  key of the value to be set
-        <type>  type can be: i8, u8, i16, u16 i32, u32 i64, u64, str, blob
-  -v, --value=<value>  value to be stored
-
-nvs_get  <key> <type>
-  Get key-value pair from selected namespace. 
-Example: nvs_get VarName i32
-         <key>  key of the value to be read
-        <type>  type can be: i8, u8, i16, u16 i32, u32 i64, u64, str, blob
-
-nvs_erase  <key>
-  Erase key-value pair from current namespace
-         <key>  key of the value to be erased
-
-nvs_namespace  <namespace>
-  Set current namespace
-   <namespace>  namespace of the partition to be selected
-
-nvs_list  <partition> [-n <namespace>] [-t <type>]
-  List stored key-value pairs stored in NVS.Namespace and type can be specified
-  to print only those key-value pairs.
-  
-Following command list variables stored inside 'nvs' partition, under namespace 'storage' with type uint32_t
-  Example: nvs_list nvs -n storage -t u32 
-
-   <partition>  partition name
-  -n, --namespace=<namespace>  namespace name
-  -t, --type=<type>  type can be: i8, u8, i16, u16 i32, u32 i64, u64, str, blob
-
-nvs_erase_namespace  <namespace>
-  Erases specified namespace
-   <namespace>  namespace to be erased
-
-set_sta  <ssid> <passwd>
-  Set SSID and password of the STA interface
-        <ssid>  SSID
-      <passwd>  Password
-  --, -u, ----username=<ent_username>  Enterprise username
-  --, -a, ----anan=<ent_identity>  Enterprise identity
-
-set_sta_static  <ip> <subnet> <gw>
-  Set Static IP for the STA interface
-          <ip>  IP
-      <subnet>  Subnet Mask
-          <gw>  Gateway Address
-
-set_ap  <ssid> <passwd>
-  Set SSID and password of the SoftAP
-        <ssid>  SSID of AP
-      <passwd>  Password of AP
-
-set_ap_ip  <ip>
-  Set IP for the AP interface
-          <ip>  IP
-
-portmap  [add|del] [TCP|UDP] <ext_portno> <int_ip> <int_portno>
-  Add or delete a portmapping to the router
-     [add|del]  add or delete portmapping
-     [TCP|UDP]  TCP or UDP port
-  <ext_portno>  external port number
-      <int_ip>  internal IP
-  <int_portno>  internal port number
-
-show 
-  Get status and config of the router
-```
-
-If you want to enter non-ASCII or special characters (incl. ' ') you can use HTTP-style hex encoding (e.g. "My%20AccessPoint" results in a string "My AccessPoint").
-
-## Set console output to UART or USB_SERIAL_JTAG (USB-OTG)
-All newer ESP32 boards have a built in [USB Serial/JTAG Controller](https://docs.espressif.com/projects/esp-idf/en/latest/esp32c3/api-guides/usb-serial-jtag-console.html). 
-If the USB port is connected directly to the USB Serial/JTAG Controller, you wont be able to use the console over UART.
-
-You can change the console output to USB_SERIAL_JTAG:
-
-**Menuconfig:**
-`Component config` -> `ESP System Settings` -> `Channel for console output` -> `USB Serial/JTAG Controller`
-
-**Changing sdkconfig directly**
-```
-CONFIG_ESP_CONSOLE_UART_DEFAULT=n
-CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
-```
-
-[Board comparison list](https://docs.espressif.com/projects/esp-idf/en/v5.0.4/esp32/hw-reference/chip-series-comparison.html)
-
-## Flashing the prebuild Binaries
-
-Get and install [esptool](https://github.com/espressif/esptool):
-
-```
-cd ~
-python3 -m pip install pyserial
-git clone https://github.com/espressif/esptool
-cd esptool
-python3 setup.py install
-```
-
-Go to esp32_nat_router project directory and build for any kind of esp32 target.
-
-For esp32:
+Install [esptool](https://github.com/espressif/esptool) and flash using the pre-built binaries from the `firmware_*` directories. Example for ESP32:
 
 ```bash
 esptool.py --chip esp32 \
 --before default_reset --after hard_reset write_flash \
 -z --flash_mode dio --flash_freq 40m --flash_size detect \
-0x1000 build/esp32/bootloader.bin \
-0x8000 build/esp32/partitions.bin \
-0x10000 build/esp32/firmware.bin
+0x1000 firmware_esp32/bootloader.bin \
+0x8000 firmware_esp32/partition-table.bin \
+0xf000 firmware_esp32/ota_data_initial.bin \
+0x20000 firmware_esp32/esp32_nat_router.bin
 ```
 
-For esp32c3:
+Pre-built binaries are available for: **ESP32**, **ESP32-C3**, **ESP32-C5**, **ESP32-C6**, **ESP32-S3**, and **WT32-ETH01** (Ethernet).
+
+See the [Installation](https://github.com/martin-ger/esp32_nat_router/wiki/Installation) wiki page for all chip-specific commands.
+
+## Documentation
+
+Full documentation is available in the [Wiki](https://github.com/martin-ger/esp32_nat_router/wiki):
+
+| Page | Description |
+|------|-------------|
+| [Web Interface](https://github.com/martin-ger/esp32_nat_router/wiki/Web-Interface) | Web UI pages, security, backup/restore |
+| [WiFi and Network](https://github.com/martin-ger/esp32_nat_router/wiki/WiFi-and-Network) | DHCP reservations, port forwarding, WPA2-Enterprise, TTL, DNS |
+| [Firewall](https://github.com/martin-ger/esp32_nat_router/wiki/Firewall) | ACL packet filtering rules and configuration |
+| [Packet Capture](https://github.com/martin-ger/esp32_nat_router/wiki/Packet-Capture) | PCAP streaming to Wireshark |
+| [WireGuard VPN](https://github.com/martin-ger/esp32_nat_router/wiki/WireGuard-VPN) | VPN tunnel configuration and server setup |
+| [Remote Console](https://github.com/martin-ger/esp32_nat_router/wiki/Remote-Console) | Network-accessible CLI via TCP |
+| [Security](https://github.com/martin-ger/esp32_nat_router/wiki/Security) | Hardening guide: interface binding, VPN, ACL, credential handling |
+| [MQTT Home Assistant](https://github.com/martin-ger/esp32_nat_router/wiki/MQTT-Home-Assistant) | MQTT telemetry with HA auto-discovery |
+| [MCP Bridge](https://github.com/martin-ger/esp32_nat_router/wiki/MCP-Bridge) | AI assistant integration via Model Context Protocol |
+| [CLI Reference](https://github.com/martin-ger/esp32_nat_router/wiki/CLI-Reference) | Full command listing for the serial/remote console |
+| [NVS Storage](https://github.com/martin-ger/esp32_nat_router/wiki/NVS-Storage) | Reference of all persisted configuration keys |
+| [Hardware](https://github.com/martin-ger/esp32_nat_router/wiki/Hardware) | LED status, OLED display, antenna switch, factory reset |
+| [WT32-ETH01](https://github.com/martin-ger/esp32_nat_router/wiki/WT32-ETH01) | Ethernet uplink variant (LAN8720 PHY) |
+| [Installation](https://github.com/martin-ger/esp32_nat_router/wiki/Installation) | Flashing pre-built binaries |
+| [Building](https://github.com/martin-ger/esp32_nat_router/wiki/Building) | Compiling from source with ESP-IDF or PlatformIO |
+
+## Building from Source
 
 ```bash
-esptool.py --chip esp32c3 \
---before default_reset --after hard_reset write_flash \
--z --flash_size detect \
-0x0 build/esp32c3/bootloader.bin \
-0x8000 build/esp32c3/partitions.bin \
-0x10000 build/esp32c3/firmware.bin
+idf.py menuconfig    # Enable LWIP IP forwarding, NAT, and L2-to-L3 copy
+idf.py build
+idf.py flash monitor
 ```
 
-As an alternative you might use [Espressif's Flash Download Tools](https://www.espressif.com/en/products/hardware/esp32/resources) with the parameters given in the figure below (thanks to mahesh2000), update the filenames accordingly:
+See the [Building](https://github.com/martin-ger/esp32_nat_router/wiki/Building) wiki page for PlatformIO, WT32-ETH01, and multi-target build instructions.
 
-![image](https://raw.githubusercontent.com/martin-ger/esp32_nat_router/master/FlasherUI.jpg)
+## Performance
 
-Note that the prebuilt binaries do not include WPA2 Enterprise support.
+The performance of the Router depends on several factors, of course including WiFi signal strength and congestion of the used frequencies. Expect something in the range from 5 - 15 mbps under reasonable conditions. Single video streams should be possible, but it is not intended as a 2$ full replacement for a professional home router.
 
-## Building the Binaries (Method 1 - ESPIDF)
-The following are the steps required to compile this project:
+Internally the speed depends on the processing power of the used ESP32 chip (single core vs. dual core, clock speed) and available RAM for buffering. All "hot pathes", i.e. the direct routing of packets are optimized, any additional features, especially VPN, ACL processing, per client statistics, and packet capturing, introduce some delays. If you need maximum speed, dynamically disable all unused features in the configuration. However in default config everything is already disabled, the only major feature, that is running, is the web interface. Especially on the C3 and C5 with small RAM (and combined DRAM and IRAM) disabling it can result in an additional performance boost, due to the additional buffer space. If required, you can re-enable it via the remote console at any time (with a reboot).
 
-1. Download and setup the ESP-IDF.
+## Licence
 
-2. In the project directory run `make menuconfig` (or `idf.py menuconfig` for cmake).
-    1. *Component config -> LWIP > [x] Enable copy between Layer2 and Layer3 packets.
-    2. *Component config -> LWIP > [x] Enable IP forwarding.
-    3. *Component config -> LWIP > [x] Enable NAT (new/experimental).
-3. Build the project and flash it to the ESP32.
-
-A detailed instruction on how to build, configure and flash a ESP-IDF project can also be found the official ESP-IDF guide. 
-
-## Building the Binaries (Method 2 - Platformio)
-The following are the steps required to compile this project:
-
-1. Download Visual Studio Code, and the Platform IO extension.
-2. In Platformio, install the ESP-IDF framework.
-3. Build the project and flash it to the ESP32.
-
-### DNS
-As soon as the ESP32 STA has learned a DNS IP from its upstream DNS server on first connect, it passes that to newly connected clients.
-Before that by default the DNS-Server which is offerd to clients connecting to the ESP32 AP is set to 8.8.8.8.
-Replace the value of the *MY_DNS_IP_ADDR* with your desired DNS-Server IP address (in hex) if you want to use a different one.
-
-## Troubleshooting
-
-### Line Endings
-
-The line endings in the Console Example are configured to match particular serial monitors. Therefore, if the following log output appears, consider using a different serial monitor (e.g. Putty for Windows or GtkTerm on Linux) or modify the example's UART configuration.
-
+The WireGuard submodul has the following licence_
 ```
-This is an example of ESP-IDF console component.
-Type 'help' to get the list of commands.
-Use UP/DOWN arrows to navigate through command history.
-Press TAB when typing command name to auto-complete.
-Your terminal application does not support escape sequences.
-Line editing and history features are disabled.
-On Windows, try using Putty instead.
-esp32>
+Copyright (c) 2021 Kenta Ida (fuga@fugafuga.org)
+
+The original license is below:
+Copyright (c) 2021 Daniel Hope (www.floorsense.nz)
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification,
+are permitted provided that the following conditions are met:
+* Redistributions of source code must retain the above copyright notice, this
+  list of conditions and the following disclaimer.
+* Redistributions in binary form must reproduce the above copyright notice, this
+  list of conditions and the following disclaimer in the documentation and/or
+  other materials provided with the distribution.
+* Neither the name of "Floorsense Ltd", "Agile Workspace Ltd" nor the names of
+  its contributors may be used to endorse or promote products derived from this
+  software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR
+ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+Author: Daniel Hope <daniel.hope@smartalock.com>
 ```
